@@ -18,6 +18,15 @@ Cloud model APIs only; no local LLMs. Version 0.7.0 implements P0 to P7 (see
 `docs/IMPLEMENTATION_PLAN.md`). Real model and real OpenCode runs still have to be checked
 on your Mac. The tests use a fake OpenCode binary and a fake review verdict.
 
+## How it works
+
+![AI Dev Team workflow](docs/images/ai-dev-team-flow.png)
+
+LangGraph only runs the planning loop (Manager → Architect → validation, back to the
+Architect when the task graph is rejected). After that, SQLite is the shared state: the
+scheduler marks tasks READY, idle Developers claim them, the test gate and the Reviewer
+decide PASS / REWORK / BLOCKED, and you merge.
+
 ## Roles
 
 | Agent | Default model | Job |
