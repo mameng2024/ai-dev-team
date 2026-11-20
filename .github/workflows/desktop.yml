@@ -1,0 +1,64 @@
+name: desktop app
+
+# Builds the desktop app (PyInstaller cannot cross-compile). Currently macOS only.
+# - every push to any branch: macOS build + self-check, the .dmg kept as an artifact
+# - "Run workflow" on the Actions page: the same, on demand
+# - a tag like v0.7.0: the same, plus a GitHub Release with the download
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest    # Apple Silicon
+            extra: ""
+          # Windows and Linux are switched off for now (only macOS is used).
+          # Uncomment to build them again; the code supports both.
+          # - os: windows-latest
+          #   extra: "pillow"
+          # - os: ubuntu-22.04
+          #   extra: "pywebview[qt]"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install -U pip
+          pip install '.[package]' ${{ matrix.extra }}
+      - name: Build and self-check
+        run: python packaging/desktop/build.py --smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-dev-team-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

@@ -7,7 +7,7 @@ acceptance criteria or unsafe paths are rejected before anything touches SQLite.
 from __future__ import annotations
 
 import re
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,12 +24,36 @@ class Milestone(BaseModel):
     goal: str
 
 
+class AcceptanceCheck(BaseModel):
+    """How one completion criterion is verified at the end of the project.
+
+    kind "command": a program checks it; exit code 0 means met (the Manager cannot
+    overrule it). kind "manual": only a person can judge it (looks, feel, wording);
+    it goes to the human acceptance checklist."""
+    criterion: str
+    kind: Literal["command", "manual"] = "manual"
+    command: list[str] = Field(default_factory=list,
+                               description="argv run in the repo root, no shell; for kind=command")
+    how_to_verify: str = Field(default="", description="steps a person follows; for kind=manual")
+
+
 class ProjectPlan(BaseModel):
     summary: str
     assumptions: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     milestones: list[Milestone] = Field(min_length=1)
     completion_criteria: list[str] = Field(min_length=1)
+    acceptance_checks: list[AcceptanceCheck] = Field(
+        default_factory=list, description="one entry per completion criterion")
+
+    def checks(self) -> list[AcceptanceCheck]:
+        """Every completion criterion with its check; criteria without one are manual."""
+        by = {c.criterion: c for c in self.acceptance_checks}
+        out = list(self.acceptance_checks)
+        for crit in self.completion_criteria:
+            if crit not in by:
+                out.append(AcceptanceCheck(criterion=crit, kind="manual"))
+        return out
 
 
 class PlannedTask(BaseModel):

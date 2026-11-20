@@ -1,9 +1,32 @@
 # AI Dev Team
 
+## Desktop app (macOS, Windows, Linux)
+
+Download the build for your system from the repo's Releases (or a pull request's
+Actions artifacts). Python is included; you only need OpenCode and git installed.
+
+- macOS: open the `.dmg`, drag AI Dev Team to Applications. It is not signed yet, so
+  the first time right-click it and choose Open.
+- Windows: unzip, run `AI Dev Team.exe` (SmartScreen: More info, Run anyway).
+- Linux: untar, run `ai-dev-team/ai-dev-team`.
+
+Build one yourself on that system: `pip install -e '.[package]'` then
+`python packaging/desktop/build.py --smoke`. Publish all three: push a tag like `v0.7.0`.
+
 A lightweight, local-first multi-agent software development orchestrator for macOS Apple Silicon.
-Cloud model APIs only; no local LLMs. Version 0.6.0 implements P0 to P7 (see
+Cloud model APIs only; no local LLMs. Version 0.7.0 implements P0 to P7 (see
 `docs/IMPLEMENTATION_PLAN.md`). Real model and real OpenCode runs still have to be checked
 on your Mac. The tests use a fake OpenCode binary and a fake review verdict.
+
+## How it works
+
+![AI Dev Team workflow](docs/images/ai-dev-team-flow.png)
+
+LangGraph only runs the planning loop (Manager → Architect → validation, back to the
+Architect when the task graph is rejected). After that, SQLite is the shared state: the
+scheduler marks tasks READY, idle Developers claim them, the test gate and the Reviewer
+decide PASS / REWORK / BLOCKED. When every task is done, final acceptance runs: the
+program checks first, then the Manager, then you. You merge into main yourself.
 
 ## Roles
 
@@ -107,6 +130,25 @@ Tasks left in TESTING, REVIEWING or MERGE_QUEUED are finished without redoing th
 Developer's work. A merge left half done on integration is aborted first. A worktree
 that was deleted or broken is rebuilt from its branch. To do these steps by hand:
 `ai-dev-team recover` (leases), `ai-dev-team review <task>` and `ai-dev-team merge <project>`.
+
+## Final acceptance
+
+Each completion criterion in the plan has a check: a command (exit code 0 means met) or a
+manual step for you. UI criteria work as commands when they are UI tests (Playwright for
+web, `xcodebuild test` with XCUITest for iOS); looks and wording stay manual. Tests can save
+screenshots under `.ai-dev-team/acceptance/` (or `acceptance_artifacts:` in
+`.ai-dev-team.yaml`) and the app shows them.
+
+```bash
+ai-dev-team acceptance minitot                         # program checks + Manager review
+ai-dev-team accept minitot                             # you accept (--force if there are gaps)
+ai-dev-team reject minitot --note "按钮太小" --replan   # note becomes the next plan
+```
+
+The Manager can only mark a criterion met with evidence; command criteria are decided by
+the exit code and manual ones always go to you. If the integration branch changes after
+the check, it has to run again. Plans made before this version have no saved plan: plan
+again to use acceptance.
 
 ## Other commands
 

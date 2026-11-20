@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0 — Desktop app for macOS, Windows and Linux
+
+- The app opens in its own window (pywebview), no browser. Falls back to the browser
+  when a machine has no webview.
+- Self-contained builds with Python inside (PyInstaller): `.dmg` for macOS (Apple
+  Silicon), `.zip` with `AI Dev Team.exe` for Windows, `.tar.gz` for Linux.
+- GitHub Actions builds all three on every pull request; a `v*` tag publishes a Release.
+- First start uses the free OpenRouter preset; settings live in the per-user app folder.
+- OpenRouter presets (`openrouter`, `openrouter-free`) and `ai-dev-team use-preset`.
+- `ai-dev-team desktop` runs the same window from a source install.
+- Final acceptance in three layers. The Manager now writes how each completion criterion
+  will be checked (a command, or a manual step) and the plan is saved. When every task is
+  done, `ai-dev-team acceptance` runs those commands and the full test suite on the
+  integration branch (exit codes decide, the Manager cannot overrule them), then the
+  Manager lines the evidence up against each criterion: no evidence, no "met", and manual
+  criteria always go to you. Screenshots the checks save under `.ai-dev-team/acceptance/`
+  show up in the app. You finish with `accept` or `reject --note ... --replan` (the note
+  becomes the next planning request), or the buttons in card ③ of the app. Check commands
+  run without a shell, with API keys scrubbed; deleting, network, sudo, inline code and
+  paths outside the repo are refused. SQLite schema 3 adds `plans` and `acceptances`.
+
 ## 0.6.0 — Mac app + one unified page
 
 - `ai-dev-team ui` is now one page with tabs: 项目与运行 / 看板 / 模型设置.

@@ -5,6 +5,7 @@
 #   ./packaging/macos/build_app.sh --install  ... and copy it to /Applications
 #   ./packaging/macos/build_app.sh --dmg      ... and make dist/AI-Dev-Team-<ver>.dmg
 #   ./packaging/macos/build_app.sh --sign "Developer ID Application: Name (TEAMID)"
+#   ./packaging/macos/build_app.sh --preset openrouter-free   switch the app to a built-in model preset
 #
 # Run it again after updating the source: it upgrades the app's environment and keeps
 # your settings, keys, projects and tasks.
@@ -15,12 +16,13 @@ SRC="$(cd "$HERE/../.." && pwd)"
 APPDIR="$HOME/Library/Application Support/AI Dev Team"
 DIST="$SRC/dist"
 APP="$DIST/AI Dev Team.app"
-INSTALL=0; DMG=0; SIGN=""
+INSTALL=0; DMG=0; SIGN=""; PRESET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --install) INSTALL=1 ;;
     --dmg) DMG=1 ;;
     --sign) SIGN="$2"; shift ;;
+    --preset) PRESET="$2"; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
   shift
@@ -66,6 +68,11 @@ fi
 # 3. Settings: copy the default model config once; never overwrite yours.
 if [ ! -f "$APPDIR/agents.yaml" ]; then
   if [ -f "$SRC/config/agents.yaml" ]; then cp "$SRC/config/agents.yaml" "$APPDIR/agents.yaml"; fi
+fi
+
+if [ -n "$PRESET" ]; then
+  echo "==> Model preset: $PRESET"
+  AI_DEV_TEAM_CONFIG="$APPDIR/agents.yaml" "$APPDIR/venv/bin/ai-dev-team" use-preset "$PRESET"
 fi
 
 # 4. A double-clicked app gets a minimal PATH; remember the login shell's PATH and tools.

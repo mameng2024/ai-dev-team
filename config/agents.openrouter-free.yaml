@@ -1,0 +1,58 @@
+# AI Dev Team - OpenRouter FREE preset (one key: OPENROUTER_API_KEY, :free models only)
+# Free models have per-minute and per-day request caps on OpenRouter, so concurrency is 1.
+# Model IDs are "openrouter/<vendor>/<model>" (LiteLLM and OpenCode use the same form).
+# Checked against https://openrouter.ai/api/v1/models on 2026-11-20.
+
+defaults:
+  timeout_s: 180
+  max_retries: 3
+  max_concurrency: 1
+  lease_seconds: 900
+
+providers:
+  openrouter:
+    api_key_env: OPENROUTER_API_KEY
+    api_base: https://openrouter.ai/api/v1
+
+agents:
+  manager:
+    role: MANAGER
+    provider: openrouter
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    reasoning: high
+    fallbacks: [openrouter/nvidia/nemotron-3.5-super-vl:free]
+  architect:
+    role: ARCHITECT
+    provider: openrouter
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    reasoning: high
+    fallbacks: [openrouter/nvidia/nemotron-3.5-super-vl:free]
+  developer-a:
+    role: DEVELOPER
+    provider: openrouter
+    model: openrouter/nvidia/nemotron-3.5-super-vl:free
+    reasoning: medium
+    fallbacks: [openrouter/nvidia/nemotron-3-ultra-550b-a55b:free]
+    executor: opencode
+  developer-b:
+    role: DEVELOPER
+    provider: openrouter
+    model: openrouter/nvidia/nemotron-3.5-super-vl:free
+    reasoning: medium
+    fallbacks: [openrouter/nvidia/nemotron-3-ultra-550b-a55b:free]
+    executor: opencode
+  reviewer:
+    role: REVIEWER
+    provider: openrouter
+    model: openrouter/google/gemma-4-31b-it:free   # different vendor from Manager: independent review
+    reasoning: high
+    fallbacks: []
+    independent: true
+
+opencode:
+  auto_approve: true
+  model_map: {}
+
+developer_routing:
+  simple: openrouter/nvidia/nemotron-3.5-super-vl:free
+  complex: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free

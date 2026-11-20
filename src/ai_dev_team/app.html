@@ -164,7 +164,7 @@ let lastKey = "";
 function renderAll(force){
   const key = JSON.stringify([ov, current, jobsCache.filter(j=>j.status==="running").map(j=>j.id)]);
   if(!force && key===lastKey) return;
-  if(!force && document.activeElement && ["req","npath","nid","nbranch"].includes(document.activeElement.id)) return;
+  if(!force && document.activeElement && ["req","npath","nid","nbranch","accnote"].includes(document.activeElement.id)) return;
   lastKey = key; renderProjects(); renderDetail();
 }
 function renderProjects(){
@@ -222,14 +222,72 @@ function renderDetail(){
         el("button",{class:"btn",onclick:()=>start("recover")},"恢复"))),
     running ? el("div",{class:"hint"},"这个项目正在执行操作，结束或停止后才能开始新的。") : ""));
 
-  const integ = p.integration;
-  box.append(el("div",{class:"card"}, el("h3",{},"③ 检查集成分支，自己合并到 main"),
+  box.append(acceptanceCard(p, running));
+
+  const integ = p.integration, acc = p.acceptance || {};
+  box.append(el("div",{class:"card"}, el("h3",{},"④ 检查集成分支，自己合并到 main"),
     integ && integ.commits.length ? [
+      acc.status!=="APPROVED" && acc.status!=="NO_PLAN" ? el("div",{class:"problems"},el("li",{},"还没通过人工验收，建议验收通过后再合并。")) : "",
       el("div",{class:"commits"}, integ.commits.map(x=>el("div",{},x))),
       el("label",{},"确认没问题后，在终端执行（ai-dev-team 永远不会自己合并到 main）"),
       el("div",{class:"copy"},integ.merge_cmd),
       el("div",{class:"row",style:"margin-top:8px"},el("button",{class:"btn",onclick:()=>{navigator.clipboard?.writeText(integ.merge_cmd); toast("已复制");}},"复制命令"))
     ] : el("div",{class:"empty"},"还没有完成合并的任务。")));
+}
+
+const ACC = {NO_PLAN:"还没有保存的规划", IN_PROGRESS:"任务还没全部完成", NEEDS_MANAGER_CHECK:"可以开始 Manager 验收",
+  GAPS:"Manager 发现缺口", AWAITING_HUMAN:"等你人工验收", APPROVED:"你已验收通过", REJECTED:"你已打回", ERROR:"读取验收状态出错"};
+const CRIT = {met:["通过","#2e7d32"], unmet:["未通过","#c62828"], needs_human:["需你判断","#b26a00"]};
+const BY = {program:"程序判定", manager:"Manager 判断", guardrail:"规则兜底"};
+function acceptanceCard(p, running){
+  const acc = p.acceptance || {status:"NO_PLAN"};
+  const card = el("div",{class:"card"}, el("h3",{},"③ 整体验收"),
+    el("div",{class:"mini"}, el("span",{},ACC[acc.status]||acc.status), acc.stale? el("span",{style:"color:#b26a00"},"集成分支有新改动，需要重新验收"):""));
+  if(acc.status==="NO_PLAN"){ card.append(el("div",{class:"hint"},"用“规划并保存任务”后，这里会列出完成标准和检查方式。")); return card; }
+  if(acc.status==="IN_PROGRESS"){ card.append(el("div",{class:"hint"},`还有 ${acc.pending.length} 个任务没完成：${acc.pending.join(", ")}`)); return card; }
+  card.append(el("div",{class:"hint"},"先由程序在集成分支跑检查命令和全部测试，Manager 再逐条对照完成标准；没证据的不会算通过，看不出来的交给你。"));
+  card.append(el("div",{class:"row",style:"margin:8px 0"},
+    el("button",{class:"btn"+(acc.status==="NEEDS_MANAGER_CHECK"?" primary":""),disabled:running?"":null,onclick:()=>start("acceptance",{project:p.id})},
+      acc.manager ? "重新做 Manager 验收" : "开始 Manager 验收")));
+  const m = acc.manager?.payload;
+  if(m && !acc.stale){
+    card.append(el("div",{class:"mini"}, el("span",{},`测试 ${m.tests_passed?"通过":"未通过"}`), m.manager_model_ok? "" : el("span",{style:"color:#b26a00"},"Manager 模型没有响应，只有程序检查结果")));
+    card.append(el("div",{class:"col",style:"gap:6px;margin-top:6px"}, m.criteria.map(c=>{
+      const [txt,color] = CRIT[c.status];
+      return el("div",{class:"step"},
+        el("b",{},c.criterion),
+        el("p",{}, el("span",{style:`color:${color};font-weight:600`},txt), ` · ${BY[c.decided_by]||c.decided_by}`),
+        c.evidence? el("p",{style:"white-space:pre-wrap;font-size:12px;color:#555"},c.evidence.slice(0,600)) : "",
+        c.status==="needs_human" && c.how_to_verify ? el("p",{},"怎么验："+c.how_to_verify) : "");
+    })));
+    if(m.summary) card.append(el("p",{},"Manager："+m.summary));
+    if(m.human_focus?.length) card.append(el("ul",{}, m.human_focus.map(x=>el("li",{},x))));
+    if(m.screenshots?.length){
+      const q = "token="+encodeURIComponent(TOKEN)+"&project="+encodeURIComponent(p.id);
+      card.append(el("div",{class:"row",style:"flex-wrap:wrap;gap:6px"}, m.screenshots.slice(0,12).map(s=>{
+        const url = "/api/acceptance/file?"+q+"&path="+encodeURIComponent(s);
+        return el("a",{href:url,target:"_blank",title:s}, el("img",{src:url,style:"height:90px;border:1px solid #ddd;border-radius:6px"}));
+      })));
+    }
+    if(acc.status==="GAPS" && m.follow_ups?.length)
+      card.append(el("div",{class:"problems"}, m.follow_ups.map(f=>el("li",{},f.slice(0,300)))));
+  }
+  if(["AWAITING_HUMAN","GAPS","APPROVED","REJECTED"].includes(acc.status) && !acc.stale){
+    const note = el("textarea",{id:"accnote",placeholder:"打回时写清楚哪里不对，会变成下一轮规划的需求；通过时可留空"});
+    note.value = localStorage.getItem("aidt.accnote."+p.id) || "";
+    note.oninput = () => localStorage.setItem("aidt.accnote."+p.id, note.value);
+    card.append(el("label",{},"你的验收意见"), note,
+      el("div",{class:"row",style:"margin-top:8px"},
+        el("button",{class:"btn primary",disabled:running?"":null,onclick:()=>{
+          const force = acc.status==="GAPS";
+          if(force && !confirm("Manager 发现了缺口，仍然验收通过？")) return;
+          start("accept",{project:p.id,note:note.value,force}); }},"验收通过"),
+        el("button",{class:"btn danger",disabled:running?"":null,onclick:()=>{
+          if(note.value.trim().length<2){ toast("请先写下哪里不对"); return; }
+          if(confirm("打回并让 Manager 和 Architect 规划新任务？")) start("reject",{project:p.id,note:note.value,replan:true}); }},"打回并生成新任务")));
+    if(acc.human) card.append(el("div",{class:"hint"},`上次决定：${acc.human.verdict==="APPROVED"?"通过":"打回"}${acc.human.payload?.note?"（"+acc.human.payload.note+"）":""}`));
+  }
+  return card;
 }
 
 // ---------- add project

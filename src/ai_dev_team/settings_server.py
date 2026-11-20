@@ -55,6 +55,12 @@ def _zh(msg: str) -> str:
     return msg
 
 
+
+def _vendor(model: str) -> str:
+    """Model maker: 'openrouter/qwen/x' -> 'qwen', 'deepseek/x' -> 'deepseek'."""
+    parts = model.split("/")
+    return parts[1] if parts[0] == "openrouter" and len(parts) > 2 else parts[0]
+
 def check(data: dict) -> tuple[list[str], list[str]]:
     """Return (errors, warnings) for a config dict, without saving."""
     try:
@@ -67,8 +73,8 @@ def check(data: dict) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     m = reg.by_role(AgentRole.MANAGER)[0]
     r = reg.by_role(AgentRole.REVIEWER)[0]
-    if m.provider == r.provider:
-        warnings.append(f"Manager 和 Reviewer 都用 {m.provider}，建议用不同厂商保持审核独立")
+    if _vendor(m.model) == _vendor(r.model):
+        warnings.append(f"Manager 和 Reviewer 都用 {_vendor(m.model)} 的模型，建议用不同厂商保持审核独立")
     if r.model in m.fallbacks:
         warnings.append("Manager 的备用模型和 Reviewer 主模型相同：Manager 降级时两者会是同一个模型")
     if r.fallbacks:
@@ -160,10 +166,51 @@ def overview(config_path: Path, db_path: Path | None) -> dict:
                                                          f"{wt.integration_branch}"}
                 except (GitError, OSError):
                     pass
+            entry["acceptance"] = _acceptance(repo, p, entry["repo_ok"])
             projects.append(entry)
     return {"projects": projects, "problems": problems,
             "db_ready": bool(db_path and Path(db_path).exists()),
             "platform": sys.platform}
+
+
+def _acceptance(repo, project: dict, repo_ok: bool) -> dict:
+    from .acceptance import state
+    from .worktrees import GitError, WorktreeManager
+
+    wt = None
+    if repo_ok:
+        try:
+            wt = WorktreeManager(Path(project["repo_path"]), project["id"],
+                                 project["default_branch"])
+        except (GitError, OSError):
+            wt = None
+    try:
+        return state(repo, project["id"], wt)
+    except Exception as exc:  # noqa: BLE001 - the page must still load
+        return {"status": "ERROR", "error": str(exc)}
+
+
+def acceptance_file(db_path: Path | None, project_id: str, rel: str) -> tuple[bytes, str] | None:
+    """A screenshot the acceptance checks left in the integration worktree (images only)."""
+    from .acceptance import IMAGE_EXT, artifact_dir
+    from .db import Database
+    from .repository import TaskRepository
+    from .worktrees import WorktreeManager
+
+    if db_path is None or not Path(db_path).exists():
+        return None
+    project = TaskRepository(Database(Path(db_path))).get_project(project_id)
+    if project is None:
+        return None
+    integ = WorktreeManager(Path(project["repo_path"]), project_id,
+                            project["default_branch"]).integration_path.resolve()
+    path = (integ / rel).resolve()
+    if path.suffix.lower() not in IMAGE_EXT or not path.is_file() \
+            or not path.is_relative_to(artifact_dir(integ)):
+        return None
+    ctype = {".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+        path.suffix.lower(), f"image/{path.suffix.lower().lstrip('.')}")
+    return path.read_bytes(), ctype
 
 
 def _cn_problem(text: str, opencode_bin: str) -> str:
@@ -246,6 +293,17 @@ def make_handler(config_path: Path, token: str, db_path: Path | None = None,
                 if job is None:
                     return self._send(404, {"error": "没有这个任务"})
                 return self._send(200, job.view(int((q.get("since") or ["0"])[0] or 0)))
+            if route == "/api/acceptance/file":
+                got = acceptance_file(db_path, (q.get("project") or [""])[0],
+                                      (q.get("path") or [""])[0])
+                if got is None:
+                    return self._send(404, {"error": "没有这张截图"})
+                self.send_response(200)
+                self.send_header("Content-Type", got[1])
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(got[0])
+                return None
             if route == "/api/state":
                 return self._send(200, state(config_path))
             if route == "/dashboard":
@@ -306,8 +364,12 @@ def make_handler(config_path: Path, token: str, db_path: Path | None = None,
     return Handler
 
 
-def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
-          db_path: Path | None = None, url_file: Path | None = None) -> None:
+def start_server(config_path: Path, port: int = 8765, db_path: Path | None = None):
+    """Bind the local page and return (server, url, jobs) without blocking.
+
+    The caller runs ``server.serve_forever()`` (in a thread for the desktop app) and
+    calls ``stop_server`` when done.
+    """
     from .jobs import JobManager
 
     token = pysecrets.token_urlsafe(24)
@@ -323,6 +385,18 @@ def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
     if server is None:
         raise SystemExit(f"ports {port}-{port + 10} are all in use")
     url = f"http://127.0.0.1:{server.server_port}/?token={token}"
+    return server, url, jobs
+
+
+def stop_server(server, jobs) -> None:
+    jobs.stop_all()
+    server.shutdown()
+    server.server_close()
+
+
+def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
+          db_path: Path | None = None, url_file: Path | None = None) -> None:
+    server, url, jobs = start_server(config_path, port, db_path)
     print(f"AI Dev Team: {url}\nCtrl+C to stop.", flush=True)
     if url_file:
         url_file.parent.mkdir(parents=True, exist_ok=True)
