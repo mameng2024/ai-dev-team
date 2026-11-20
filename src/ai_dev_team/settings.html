@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Dev Team · 模型设置</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#e3e3e0;
+          --ok:#1f8a4c; --warn:#b26a00; --err:#c62828; --accent:#2f5bea; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:5; background:rgba(246,246,244,.92); backdrop-filter:blur(8px);
+           border-bottom:1px solid var(--line); padding:12px 24px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  header .path { color:var(--mute); font-size:12px; }
+  main { max-width:1040px; margin:0 auto; padding:20px 24px 80px; }
+  h2 { font-size:15px; margin:28px 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(480px,1fr)); gap:12px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  label { color:var(--mute); font-size:12px; min-width:72px; }
+  input, select, textarea { font:inherit; border:1px solid var(--line); border-radius:8px; padding:6px 8px; background:#fff; }
+  input.model { flex:1; min-width:220px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  textarea { width:100%; font-family:ui-monospace,Menlo,monospace; font-size:13px; min-height:52px; }
+  button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .badge { font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; background:#eef1fd; color:var(--accent); }
+  .badge.REVIEWER { background:#fdeeee; color:var(--err); } .badge.MANAGER { background:#eef8f1; color:var(--ok); }
+  .title { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .title b { font-size:15px; }
+  .hint { color:var(--mute); font-size:12px; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
+  .result { font-size:12px; font-family:ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-all; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:6px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--mute); font-weight:500; font-size:12px; }
+  #checks li { margin:2px 0; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#1d1d1f; color:#fff;
+           padding:10px 16px; border-radius:10px; display:none; }
+  body.embed header h1, body.embed #navBoard { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Dev Team · 模型设置</h1>
+  <a id="navBoard" href="#" style="color:#6e6e73;text-decoration:none">看板 →</a>
+  <span class="path" id="path"></span>
+  <button id="reload">放弃修改</button>
+  <button class="primary" id="save">保存</button>
+</header>
+<main>
+  <div class="card" id="checkbox"><b>检查结果</b><ul id="checks"></ul></div>
+
+  <h2>Agent 模型</h2>
+  <div class="grid" id="agents"></div>
+
+  <h2>Developer 按复杂度切换模型</h2>
+  <div class="card" id="routing"></div>
+
+  <h2>OpenCode（Developer 执行器）</h2>
+  <div class="card" id="opencode"></div>
+
+  <h2>厂商与 API Key</h2>
+  <div class="card">
+    <table><thead><tr><th>厂商（模型前缀）</th><th>Key 变量名</th><th>API Base</th><th>Key 状态</th><th></th></tr></thead>
+      <tbody id="providers"></tbody></table>
+    <div class="row"><button id="addProvider">+ 添加厂商</button>
+      <span class="hint">Key 只保存在本机 ~/.ai-dev-team/secrets.env（权限 600），页面不会回显；环境变量优先。</span></div>
+  </div>
+
+  <h2>运行参数</h2>
+  <div class="card" id="defaults"></div>
+</main>
+<div class="toast" id="toast"></div>
+<datalist id="models"></datalist>
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token");
+if (new URLSearchParams(location.search).get("embed")) document.body.classList.add("embed");
+document.getElementById("navBoard").href = "/dashboard?token=" + encodeURIComponent(TOKEN);
+let S = null, cfg = null, dirty = false;
+
+async function api(path, body) {
+  const opt = body === undefined ? {headers:{"X-Token":TOKEN}}
+    : {method:"POST", headers:{"X-Token":TOKEN,"Content-Type":"application/json"}, body:JSON.stringify(body)};
+  const r = await fetch(path, opt); const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.style.display="block";
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none",2600); }
+function el(tag, attrs={}, ...kids){ const e=document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) { if(k.startsWith("on")) e.addEventListener(k.slice(2),v);
+    else if(k==="class") e.className=v; else if(v!==undefined && v!==null) e.setAttribute(k,v); }
+  for (const k of kids.flat()) e.append(k?.nodeType ? k : document.createTextNode(k ?? "")); return e; }
+const ROLE_CN = {MANAGER:"Manager · 拆需求/排优先级", ARCHITECT:"Architect · 设计/拆任务",
+                 DEVELOPER:"Developer · 写代码（经 OpenCode）", REVIEWER:"Reviewer · 独立审核，有否决权"};
+
+function allModels(){ const s=new Set();
+  for (const a of Object.values(cfg.agents||{})) { s.add(a.model); (a.fallbacks||[]).forEach(f=>s.add(f)); }
+  Object.values(cfg.developer_routing||{}).forEach(m=>s.add(m)); return [...s].filter(Boolean).sort(); }
+function refreshDatalist(){ const d=document.getElementById("models"); d.innerHTML="";
+  allModels().forEach(m=>d.append(el("option",{value:m}))); }
+function changed(){ dirty=true; refreshDatalist(); validateSoon(); }
+
+let vt=null;
+function validateSoon(){ clearTimeout(vt); vt=setTimeout(async()=>{
+  try { const r=await api("/api/validate",{config:cfg}); renderChecks(r.errors,r.warnings); }
+  catch(e){ renderChecks([e.message],[]); } },250); }
+function renderChecks(errors, warnings){
+  const ul=document.getElementById("checks"); ul.innerHTML="";
+  errors.forEach(e=>ul.append(el("li",{class:"err"},"✕ "+e)));
+  warnings.forEach(w=>ul.append(el("li",{class:"warn"},"! "+w)));
+  if(!errors.length && !warnings.length) ul.append(el("li",{class:"ok"},"✓ 配置有效"));
+  document.getElementById("save").disabled = errors.length>0;
+}
+
+async function testModel(model, reasoning, out){
+  out.className="result"; out.textContent="测试中… "+model;
+  try { const r=await api("/api/test",{config:cfg, model, reasoning});
+    if(r.ok){ out.className="result ok"; out.textContent=`✓ ${model}  ${r.latency_ms} ms  in ${r.input_tokens} / out ${r.output_tokens} tokens`; }
+    else { out.className="result err"; out.textContent=`✕ ${model}\n${r.error}`; } }
+  catch(e){ out.className="result err"; out.textContent="✕ "+e.message; }
+}
+
+function renderAgents(){
+  const box=document.getElementById("agents"); box.innerHTML="";
+  const providers=Object.keys(cfg.providers||{});
+  for (const [id,a] of Object.entries(cfg.agents||{})) {
+    const out=el("div",{class:"result"});
+    const prov=el("select",{onchange:e=>{a.provider=e.target.value; changed();}},
+      providers.map(p=>{const o=el("option",{value:p},p); if(p===a.provider) o.selected=true; return o;}));
+    const model=el("input",{class:"model",list:"models",value:a.model,oninput:e=>{a.model=e.target.value.trim(); changed();}});
+    const reas=el("select",{onchange:e=>{a.reasoning=e.target.value; changed();}},
+      ["low","medium","high"].map(r=>{const o=el("option",{value:r},r); if(r===(a.reasoning||"medium")) o.selected=true; return o;}));
+    const fb=el("textarea",{placeholder:a.role==="REVIEWER"?"建议留空：Reviewer 不静默降级":"每行一个，按顺序尝试",
+      oninput:e=>{a.fallbacks=e.target.value.split("\n").map(s=>s.trim()).filter(Boolean); changed();}});
+    fb.value=(a.fallbacks||[]).join("\n");
+    box.append(el("div",{class:"card"},
+      el("div",{class:"title"},el("b",{},id),el("span",{class:"badge "+a.role},a.role)),
+      el("div",{class:"hint"},ROLE_CN[a.role]||"", a.executor==="opencode"?"；模型通过 OpenCode --model 传入":""),
+      el("div",{class:"row"},el("label",{},"厂商"),prov,el("label",{},"推理强度"),reas),
+      el("div",{class:"row"},el("label",{},"主模型"),model,
+        el("button",{onclick:()=>testModel(a.model,a.reasoning,out)},"测试")),
+      el("div",{class:"row"},el("label",{},"备用模型"),fb),
+      el("div",{class:"row"},el("button",{onclick:async()=>{for(const m of [a.model,...(a.fallbacks||[])]) await testModel(m,a.reasoning,out);}},"依次测试全部"),out)
+    ));
+  }
+}
+
+function renderRouting(){
+  const box=document.getElementById("routing"); box.innerHTML="";
+  cfg.developer_routing = cfg.developer_routing || {};
+  for (const k of ["simple","complex"]) {
+    const out=el("div",{class:"result"});
+    const inp=el("input",{class:"model",list:"models",value:cfg.developer_routing[k]||"",
+      oninput:e=>{cfg.developer_routing[k]=e.target.value.trim(); changed();}});
+    box.append(el("div",{class:"row"},el("label",{},k==="simple"?"简单任务":"复杂任务"),inp,
+      el("button",{onclick:()=>testModel(cfg.developer_routing[k],"medium",out)},"测试"),out));
+  }
+  box.append(el("div",{class:"hint"},"Architect 给任务标的复杂度决定用哪个；没标时用 Developer 自己的主模型。"));
+}
+
+function renderOpenCode(){
+  const box=document.getElementById("opencode"); box.innerHTML="";
+  cfg.opencode = cfg.opencode || {auto_approve:true, model_map:{}};
+  const oc=cfg.opencode; oc.model_map = oc.model_map || {};
+  const cb=el("input",{type:"checkbox",onchange:e=>{oc.auto_approve=e.target.checked; changed();}});
+  cb.checked = oc.auto_approve !== false;
+  const ta=el("textarea",{placeholder:"deepseek/deepseek-flash = deepseek/deepseek-v4-flash",
+    oninput:e=>{ const m={}; e.target.value.split("\n").forEach(l=>{ const [a,b]=l.split("=").map(x=>x&&x.trim());
+      if(a&&b) m[a]=b; }); oc.model_map=m; changed(); }});
+  ta.value = Object.entries(oc.model_map).map(([a,b])=>`${a} = ${b}`).join("\n");
+  box.append(el("div",{class:"row"},cb,el("span",{},"自动批准工具权限（--auto，只在一次性 worktree 里运行）")),
+    el("div",{class:"row"},el("label",{},"模型名映射"),ta),
+    el("div",{class:"hint"},"OpenCode 的模型名和上面不一样时才需要填，每行「上面的模型 = OpenCode 的模型」。用 ai-dev-team opencode-check 检查。"));
+}
+
+function renderProviders(){
+  const tb=document.getElementById("providers"); tb.innerHTML="";
+  for (const [name,p] of Object.entries(cfg.providers||{})) {
+    const k=S.keys[name]||{}; const keyIn=el("input",{type:"password",placeholder:"粘贴新 Key",autocomplete:"off",style:"width:150px"});
+    const status = k.source==="env" ? el("span",{class:"ok"},"✓ 环境变量")
+                 : k.source==="file" ? el("span",{class:"ok"},"✓ 已保存") : el("span",{class:"warn"},"未设置");
+    tb.append(el("tr",{},
+      el("td",{},el("b",{},name)),
+      el("td",{},el("input",{value:p.api_key_env||"",style:"width:200px",oninput:e=>{p.api_key_env=e.target.value.trim(); changed();}})),
+      el("td",{},el("input",{value:p.api_base||"",style:"width:260px",placeholder:"留空用默认",
+        oninput:e=>{const v=e.target.value.trim(); if(v) p.api_base=v; else delete p.api_base; changed();}})),
+      el("td",{},status),
+      el("td",{},keyIn,
+        el("button",{onclick:async()=>{ if(!keyIn.value) return;
+          try{ S=await api("/api/key",{name:p.api_key_env,value:keyIn.value}); keyIn.value=""; toast("Key 已保存"); renderProviders(); validateSoon(); }
+          catch(e){ toast("✕ "+e.message); } }},"保存 Key"),
+        k.source==="file" ? el("button",{onclick:async()=>{ S=await api("/api/key",{name:p.api_key_env,delete:true}); renderProviders(); validateSoon(); }},"删除") : "")
+    ));
+  }
+}
+
+function renderDefaults(){
+  const box=document.getElementById("defaults"); box.innerHTML=""; cfg.defaults=cfg.defaults||{};
+  const F=[["timeout_s","单次模型调用超时（秒）"],["max_retries","最多返工次数（≤3）"],
+           ["max_concurrency","并发 Developer 数"],["lease_seconds","任务租约（秒）"]];
+  const row=el("div",{class:"row"});
+  for (const [k,lab] of F) row.append(el("label",{},lab),
+    el("input",{type:"number",value:cfg.defaults[k]??"",style:"width:90px",
+      oninput:e=>{cfg.defaults[k]=e.target.value===""?undefined:Number(e.target.value); changed();}}));
+  box.append(row);
+}
+
+function renderAll(){ document.getElementById("path").textContent=S.path;
+  renderAgents(); renderRouting(); renderOpenCode(); renderProviders(); renderDefaults(); refreshDatalist();
+  renderChecks(S.errors,S.warnings); }
+
+async function load(){ S=await api("/api/state"); cfg=structuredClone(S.config); dirty=false; renderAll(); }
+
+document.getElementById("save").onclick=async()=>{
+  try{ S=await api("/api/save",{config:cfg}); cfg=structuredClone(S.config); dirty=false; renderAll();
+    toast(S.backup?"已保存，旧配置已备份":"已保存"); }
+  catch(e){ toast("✕ "+e.message); } };
+document.getElementById("reload").onclick=load;
+document.getElementById("addProvider").onclick=()=>{
+  const name=prompt("厂商名（也是模型前缀，例如 openai、anthropic、moonshot）"); if(!name) return;
+  cfg.providers[name.trim()]={api_key_env:name.trim().toUpperCase().replace(/[^A-Z0-9]/g,"_")+"_API_KEY"};
+  changed(); renderAll(); };
+window.addEventListener("beforeunload",e=>{ if(dirty){ e.preventDefault(); e.returnValue=""; } });
+load().catch(e=>document.body.innerHTML="<p style='padding:24px'>无法加载："+e.message+"<br>请用命令行打印的完整链接打开。</p>");
+</script>
+</body>
+</html>

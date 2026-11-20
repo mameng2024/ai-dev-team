@@ -1,0 +1,65 @@
+# AI Dev Team - per-agent model configuration
+# Model IDs use LiteLLM format "<provider>/<model-id>".
+# !! Verify every model ID against your provider console before first run.
+#    Nothing here is assumed to exist; `ai-dev-team config-check` reports what is missing.
+# API keys are read from environment variables only (never written in this file).
+
+defaults:
+  timeout_s: 180
+  max_retries: 3          # per-task rework limit
+  max_concurrency: 2      # concurrent Developer tasks
+  lease_seconds: 900      # a claimed task returns to READY if its worker stops renewing
+
+providers:
+  deepseek:
+    api_key_env: DEEPSEEK_API_KEY
+    api_base: https://api.deepseek.com
+  dashscope:
+    api_key_env: DASHSCOPE_API_KEY
+    api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+agents:
+  manager:
+    role: MANAGER
+    provider: dashscope
+    model: dashscope/qwen4-max          # TODO verify exact Qwen4-Max model ID in Model Studio
+    reasoning: high
+    fallbacks: [deepseek/deepseek-v4-pro]
+  architect:
+    role: ARCHITECT
+    provider: deepseek
+    model: deepseek/deepseek-v4-pro
+    reasoning: high
+    fallbacks: [dashscope/qwen4-max]
+  developer-a:
+    role: DEVELOPER
+    provider: deepseek
+    model: deepseek/deepseek-flash
+    reasoning: medium
+    fallbacks: [deepseek/deepseek-v4-pro]
+    executor: opencode                  # code is written by OpenCode, this model is passed to it
+  developer-b:
+    role: DEVELOPER
+    provider: deepseek
+    model: deepseek/deepseek-flash
+    reasoning: medium
+    fallbacks: [deepseek/deepseek-v4-pro]
+    executor: opencode
+  reviewer:
+    role: REVIEWER
+    provider: deepseek
+    model: deepseek/deepseek-v4-pro
+    reasoning: high
+    fallbacks: []                       # never silently downgrade the reviewer
+    independent: true                   # separate process/session; never sees developer session
+
+# OpenCode (Developer executor)
+opencode:
+  auto_approve: true          # pass --auto (tool permissions), only inside task worktrees
+  model_map: {}               # LiteLLM id -> OpenCode id if they differ; see `opencode models`
+  # e.g. deepseek/deepseek-flash: deepseek/deepseek-v4-flash
+
+# Developer model may be switched per task by complexity (P2+):
+developer_routing:
+  simple: deepseek/deepseek-flash
+  complex: deepseek/deepseek-v4-pro

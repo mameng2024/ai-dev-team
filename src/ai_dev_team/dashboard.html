@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Dev Team · 看板</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#e3e3e0; --accent:#2f5bea; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif; background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:5; background:rgba(246,246,244,.92); backdrop-filter:blur(8px);
+           border-bottom:1px solid var(--line); padding:12px 24px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; }
+  nav a { color:var(--mute); text-decoration:none; margin-right:12px; } nav a.on { color:var(--ink); font-weight:600; }
+  .spacer { flex:1; } .mute { color:var(--mute); font-size:12px; }
+  main { max-width:1200px; margin:0 auto; padding:20px 24px 60px; }
+  h2 { font-size:15px; margin:24px 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px; overflow-x:auto; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { border-radius:10px; padding:8px 12px; background:#fff; border:1px solid var(--line); min-width:96px; }
+  .chip b { display:block; font-size:20px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:500; font-size:12px; white-space:nowrap; }
+  .st { font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; white-space:nowrap; }
+  .PENDING{background:#f0f0ee;color:#6e6e73} .READY{background:#eef1fd;color:#2f5bea}
+  .ASSIGNED,.RUNNING{background:#fff4e0;color:#b26a00} .TESTING,.REVIEWING{background:#f3eefd;color:#6b3fd1}
+  .REWORK{background:#fdeeee;color:#c62828} .MERGE_QUEUED,.MERGED{background:#e9f6fb;color:#0b7285}
+  .COMPLETED{background:#eaf7ef;color:#1f8a4c} .BLOCKED,.FAILED{background:#c62828;color:#fff}
+  .mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .err { color:#c62828; font-size:12px; max-width:320px; white-space:pre-wrap; }
+  .grid2 { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
+  @media (max-width:900px){ .grid2{grid-template-columns:1fr;} }
+  select { font:inherit; border:1px solid var(--line); border-radius:8px; padding:4px 8px; background:#fff; }
+  body.embed header h1, body.embed nav { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Dev Team</h1>
+  <nav><a id="navSettings" href="#">模型设置</a><a class="on" href="#">看板</a></nav>
+  <span class="spacer"></span>
+  <select id="project"><option value="">全部项目</option></select>
+  <span class="mute" id="stamp"></span>
+</header>
+<main>
+  <div class="chips" id="counts"></div>
+  <h2>任务</h2>
+  <div class="card"><table><thead><tr>
+    <th>状态</th><th>任务</th><th>依赖</th><th>Worker / 模型</th><th>返工</th><th>最近审核</th><th>分支</th><th>更新</th>
+  </tr></thead><tbody id="tasks"></tbody></table></div>
+  <div class="grid2">
+    <div><h2>最近事件</h2><div class="card"><table><tbody id="events"></tbody></table></div></div>
+    <div><h2>模型用量</h2><div class="card"><table><thead><tr><th>模型</th><th>调用</th><th>输入</th><th>输出</th></tr></thead>
+      <tbody id="usage"></tbody></table></div></div>
+  </div>
+</main>
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token");
+if (new URLSearchParams(location.search).get("embed")) document.body.classList.add("embed");
+document.getElementById("navSettings").href = "/settings?token=" + encodeURIComponent(TOKEN);
+const ORDER = ["RUNNING","ASSIGNED","TESTING","REVIEWING","REWORK","MERGE_QUEUED","READY","PENDING","BLOCKED","FAILED","MERGED","COMPLETED"];
+const CN = {PENDING:"等待依赖",READY:"就绪",ASSIGNED:"已分配",RUNNING:"开发中",TESTING:"测试中",REVIEWING:"审核中",
+  REWORK:"返工",MERGE_QUEUED:"待合并",MERGED:"已合并",COMPLETED:"完成",BLOCKED:"阻塞",FAILED:"失败"};
+function el(tag, attrs={}, ...kids){ const e=document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) { if(k==="class") e.className=v; else if(v!=null) e.setAttribute(k,v); }
+  for (const k of kids.flat()) e.append(k?.nodeType ? k : document.createTextNode(k ?? "")); return e; }
+function ago(ts){ if(!ts) return ""; const d=new Date(ts.replace(" ","T")+"Z"); const s=(Date.now()-d)/1000;
+  return s<60?`${Math.max(0,s|0)} 秒前`:s<3600?`${s/60|0} 分钟前`:s<86400?`${s/3600|0} 小时前`:d.toLocaleString(); }
+let projectsLoaded=false;
+async function load(){
+  const p=document.getElementById("project").value;
+  const r=await fetch("/api/dashboard"+(p?`?project=${encodeURIComponent(p)}`:""),{headers:{"X-Token":TOKEN}});
+  if(!r.ok){ document.body.innerHTML="<p style='padding:24px'>无法加载，请用命令行打印的完整链接打开。</p>"; return; }
+  const d=await r.json();
+  if(!projectsLoaded){ const sel=document.getElementById("project");
+    d.projects.forEach(x=>sel.append(el("option",{value:x.id},`${x.name||x.id}`))); projectsLoaded=true; }
+  const c=document.getElementById("counts"); c.innerHTML="";
+  const total=d.tasks.length; c.append(el("div",{class:"chip"},el("b",{},String(total)),"全部任务"));
+  ORDER.filter(s=>d.counts[s]).forEach(s=>c.append(el("div",{class:"chip"},el("b",{},String(d.counts[s])),el("span",{class:"st "+s},CN[s]))));
+  if(d.note) c.append(el("div",{class:"chip mute"},d.note));
+  const tb=document.getElementById("tasks"); tb.innerHTML="";
+  const tasks=[...d.tasks].sort((a,b)=>ORDER.indexOf(a.status)-ORDER.indexOf(b.status));
+  if(!tasks.length) tb.append(el("tr",{},el("td",{colspan:8,class:"mute"},"还没有任务。用 ai-dev-team plan 生成。")));
+  for(const t of tasks){
+    tb.append(el("tr",{},
+      el("td",{},el("span",{class:"st "+t.status},CN[t.status]||t.status)),
+      el("td",{},el("div",{class:"mono"},t.id),el("div",{},t.title), t.last_error?el("div",{class:"err"},t.last_error.slice(0,300)):""),
+      el("td",{class:"mono"},t.depends_on||""),
+      el("td",{},el("div",{},t.assigned_worker||""),el("div",{class:"mono mute"},t.assigned_model||"")),
+      el("td",{},`${t.retry_count}/${t.max_retries}`),
+      el("td",{},t.last_review||""),
+      el("td",{class:"mono mute"},t.branch_name||""),
+      el("td",{class:"mute"},ago(t.updated_at))));
+  }
+  const ev=document.getElementById("events"); ev.innerHTML="";
+  for(const e of d.events){ let pl=""; try{ const o=JSON.parse(e.payload_json||"{}");
+      pl=Object.entries(o).map(([k,v])=>`${k}=${typeof v==="object"?JSON.stringify(v):v}`).join(" "); }catch{}
+    ev.append(el("tr",{},el("td",{class:"mute",style:"white-space:nowrap"},ago(e.created_at)),
+      el("td",{},el("b",{},e.event_type)," ",el("span",{class:"mono"},e.task_id||""),el("div",{class:"mute mono"},pl.slice(0,200))))); }
+  const us=document.getElementById("usage"); us.innerHTML="";
+  for(const u of d.usage) us.append(el("tr",{},el("td",{class:"mono"},u.model_id+(u.status!=="OK"?` (${u.status})`:"")),
+    el("td",{},String(u.calls)),el("td",{},String(u.input_tokens||0)),el("td",{},String(u.output_tokens||0))));
+  if(!d.usage.length) us.append(el("tr",{},el("td",{colspan:4,class:"mute"},"暂无调用")));
+  document.getElementById("stamp").textContent="每 5 秒刷新 · "+new Date().toLocaleTimeString();
+}
+document.getElementById("project").onchange=load;
+load(); setInterval(load,5000);
+</script>
+</body>
+</html>

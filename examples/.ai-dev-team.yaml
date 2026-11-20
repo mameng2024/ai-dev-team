@@ -1,0 +1,12 @@
+# Put this file in the root of the target repo (e.g. MiniTot) and commit it.
+# Each command is run in the task workspace without a shell; API keys are removed from env.
+test_commands:
+  # Swift Package:
+  - swift test
+  # Xcode app (iOS): replace scheme / simulator with yours (`xcodebuild -list`,
+  # `xcrun simctl list devices available`). -quiet keeps the log short for the Reviewer.
+  # - xcodebuild test -project MiniTot.xcodeproj -scheme MiniTot -destination "platform=iOS Simulator,name=iPhone 16" -derivedDataPath .build/DerivedData -quiet
+  # Python / Node:
+  # - python -m pytest -q
+  # - npm test --silent
+test_timeout_s: 1200   # first xcodebuild run on 8 GB RAM can be slow
