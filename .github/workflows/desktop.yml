@@ -1,6 +1,6 @@
 name: desktop app
 
-# Builds the desktop app on macOS, Windows and Linux (PyInstaller cannot cross-compile).
+# Builds the desktop app (PyInstaller cannot cross-compile). Currently macOS only.
 # Only on demand, to save Actions minutes (macOS minutes count several times over):
 # - "Run workflow" on the Actions page: build + self-check, files kept as artifacts
 # - a tag like v0.7.0: the same, plus a GitHub Release with the three downloads
@@ -20,10 +20,12 @@ jobs:
         include:
           - os: macos-latest    # Apple Silicon
             extra: ""
-          - os: windows-latest
-            extra: "pillow"
-          - os: ubuntu-22.04
-            extra: "pywebview[qt]"
+          # Windows and Linux are switched off for now (only macOS is used).
+          # Uncomment to build them again; the code supports both.
+          # - os: windows-latest
+          #   extra: "pillow"
+          # - os: ubuntu-22.04
+          #   extra: "pywebview[qt]"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
