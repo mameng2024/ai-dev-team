@@ -2,7 +2,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Columns added after v0.1.0, applied to existing databases by `initialize()`.
 MIGRATIONS_V2 = [
@@ -135,6 +135,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_exec_active_worker
 -- Rule 7: one merge artifact per task.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_merge_artifact
     ON artifacts(task_id) WHERE artifact_type = 'MERGE';
+
+-- v3: the Manager's plan is kept for final acceptance; one row per acceptance step.
+CREATE TABLE IF NOT EXISTS plans (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    request TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    task_ids_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS acceptances (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    plan_id TEXT REFERENCES plans(id),
+    stage TEXT NOT NULL CHECK(stage IN ('MANAGER','HUMAN')),
+    verdict TEXT NOT NULL CHECK(verdict IN ('READY_FOR_HUMAN','GAPS','APPROVED','REJECTED')),
+    integration_sha TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_acceptances_project ON acceptances(project_id);
 
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 """

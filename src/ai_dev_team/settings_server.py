@@ -166,10 +166,51 @@ def overview(config_path: Path, db_path: Path | None) -> dict:
                                                          f"{wt.integration_branch}"}
                 except (GitError, OSError):
                     pass
+            entry["acceptance"] = _acceptance(repo, p, entry["repo_ok"])
             projects.append(entry)
     return {"projects": projects, "problems": problems,
             "db_ready": bool(db_path and Path(db_path).exists()),
             "platform": sys.platform}
+
+
+def _acceptance(repo, project: dict, repo_ok: bool) -> dict:
+    from .acceptance import state
+    from .worktrees import GitError, WorktreeManager
+
+    wt = None
+    if repo_ok:
+        try:
+            wt = WorktreeManager(Path(project["repo_path"]), project["id"],
+                                 project["default_branch"])
+        except (GitError, OSError):
+            wt = None
+    try:
+        return state(repo, project["id"], wt)
+    except Exception as exc:  # noqa: BLE001 - the page must still load
+        return {"status": "ERROR", "error": str(exc)}
+
+
+def acceptance_file(db_path: Path | None, project_id: str, rel: str) -> tuple[bytes, str] | None:
+    """A screenshot the acceptance checks left in the integration worktree (images only)."""
+    from .acceptance import IMAGE_EXT, artifact_dir
+    from .db import Database
+    from .repository import TaskRepository
+    from .worktrees import WorktreeManager
+
+    if db_path is None or not Path(db_path).exists():
+        return None
+    project = TaskRepository(Database(Path(db_path))).get_project(project_id)
+    if project is None:
+        return None
+    integ = WorktreeManager(Path(project["repo_path"]), project_id,
+                            project["default_branch"]).integration_path.resolve()
+    path = (integ / rel).resolve()
+    if path.suffix.lower() not in IMAGE_EXT or not path.is_file() \
+            or not path.is_relative_to(artifact_dir(integ)):
+        return None
+    ctype = {".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+        path.suffix.lower(), f"image/{path.suffix.lower().lstrip('.')}")
+    return path.read_bytes(), ctype
 
 
 def _cn_problem(text: str, opencode_bin: str) -> str:
@@ -252,6 +293,17 @@ def make_handler(config_path: Path, token: str, db_path: Path | None = None,
                 if job is None:
                     return self._send(404, {"error": "没有这个任务"})
                 return self._send(200, job.view(int((q.get("since") or ["0"])[0] or 0)))
+            if route == "/api/acceptance/file":
+                got = acceptance_file(db_path, (q.get("project") or [""])[0],
+                                      (q.get("path") or [""])[0])
+                if got is None:
+                    return self._send(404, {"error": "没有这张截图"})
+                self.send_response(200)
+                self.send_header("Content-Type", got[1])
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(got[0])
+                return None
             if route == "/api/state":
                 return self._send(200, state(config_path))
             if route == "/dashboard":

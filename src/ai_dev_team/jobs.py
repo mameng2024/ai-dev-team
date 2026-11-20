@@ -21,12 +21,13 @@ from pathlib import Path
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 TASK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
-MUTATING = {"plan", "run", "merge", "review"}
+MUTATING = {"plan", "run", "merge", "review", "acceptance", "accept", "reject"}
 
 LABELS = {
     "init": "初始化", "project_add": "添加项目", "plan": "规划", "run": "运行",
     "merge": "处理合并队列", "integration": "集成分支", "recover": "恢复租约",
     "review": "重新审核", "config_check": "检查配置", "opencode_check": "检查 OpenCode",
+    "acceptance": "Manager 验收", "accept": "人工验收通过", "reject": "人工验收打回",
 }
 
 
@@ -79,6 +80,25 @@ def build_argv(kind: str, args: dict) -> tuple[list[str], str | None]:
     if kind in ("merge", "integration"):
         pid = _need(args, "project", ID_RE, "项目 ID ")
         return [kind, pid], pid
+    if kind == "acceptance":
+        pid = _need(args, "project", ID_RE, "项目 ID ")
+        return ["acceptance", pid], pid
+    if kind in ("accept", "reject"):
+        pid = _need(args, "project", ID_RE, "项目 ID ")
+        note = str(args.get("note", "")).strip()
+        if len(note) > 4000:
+            raise JobError("备注太长")
+        if kind == "reject":
+            if len(note) < 2:
+                raise JobError("打回时请写清楚哪里不对")
+            argv = ["reject", pid, "--note", note]
+            if args.get("replan", True):
+                argv.append("--replan")
+            return argv, pid
+        argv = ["accept", pid] + (["--note", note] if note else [])
+        if args.get("force"):
+            argv.append("--force")
+        return argv, pid
     if kind == "review":
         tid = _need(args, "task", TASK_RE, "任务 ID ")
         return ["review", tid], tid.split(":", 1)[0]

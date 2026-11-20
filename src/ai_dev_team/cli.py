@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -131,6 +132,11 @@ def plan(project_id: str, request: str,
          save: bool = typer.Option(True, help="Save the task DAG to SQLite"),
          context_file: Path | None = typer.Option(None, help="Extra project context")):
     """Manager plans, Architect builds a validated task DAG (calls cloud models)."""
+    ctx = context_file.read_text(encoding="utf-8") if context_file else ""
+    _plan(project_id, request, save, ctx)
+
+
+def _plan(project_id: str, request: str, save: bool, ctx: str = "") -> None:
     from .agents.planning import Planner, to_task_specs
     from .llm import LiteLLMClient
 
@@ -139,14 +145,20 @@ def plan(project_id: str, request: str,
         raise typer.BadParameter(f"unknown project {project_id}; run project-add first")
     reg = settings.registry()
     llm = LiteLLMClient(reg, usage_sink=repo.record_usage)
-    ctx = context_file.read_text(encoding="utf-8") if context_file else ""
     state = Planner(llm).run(request, ctx)
     if state.get("problems"):
         print("[red]Architect could not produce a valid DAG:[/red]")
         for p in state["problems"]:
             print(f"  - {p}")
         raise typer.Exit(1)
-    print("[bold]Plan[/bold]: " + state["plan"].summary)
+    plan_obj = state["plan"]
+    print("[bold]Plan[/bold]: " + plan_obj.summary)
+    checks = plan_obj.checks()
+    if checks:
+        print("[bold]Acceptance[/bold] (checked when every task is done):")
+        for c in checks:
+            how = shlex.join(c.command) if c.kind == "command" else (c.how_to_verify or "by you")
+            print(f"  - [{'program' if c.kind == 'command' else 'you'}] {c.criterion}: {how}")
     specs = to_task_specs(state["graph"], project_id, reg.defaults.max_retries)
     t = Table(title="Task DAG")
     for c in ("ID", "Title", "Depends on", "Priority"):
@@ -156,6 +168,7 @@ def plan(project_id: str, request: str,
     print(t)
     if save:
         repo.create_tasks(specs)
+        repo.save_plan(project_id, request, plan_obj.model_dump(), [s.id for s in specs])
         promoted = repo.promote_ready(project_id)
         print(f"[green]Saved {len(specs)} tasks[/green]; {len(promoted)} READY now.")
 
@@ -350,8 +363,99 @@ def integration(project_id: str):
           f"{wt.default_branch}); worktree {wt.integration_path}")
     for line in log_lines:
         print(f"  {line}")
+    from .acceptance import state as acceptance_state
+    st = acceptance_state(repo, project_id, wt)
+    print(f"Acceptance: {STATUS_TEXT[st['status']]}")
+    if st["status"] != "APPROVED" and log_lines:
+        print("[yellow]Not accepted yet: run `ai-dev-team acceptance` and accept before "
+              "merging.[/yellow]")
     print(f"[dim]Review, then merge it yourself: git -C {wt.repo} merge --no-ff "
           f"{wt.integration_branch}  (ai-dev-team never does this)[/dim]")
+
+
+STATUS_TEXT = {
+    "NO_PLAN": "no saved plan", "IN_PROGRESS": "tasks still running",
+    "NEEDS_MANAGER_CHECK": "ready for the Manager check", "GAPS": "Manager found gaps",
+    "AWAITING_HUMAN": "waiting for your acceptance", "APPROVED": "accepted by you",
+    "REJECTED": "rejected by you",
+}
+
+
+@app.command()
+def acceptance(project_id: str):
+    """Final acceptance, step 1: run the plan's checks and the tests on the integration
+    branch, then the Manager lines the evidence up against every completion criterion."""
+    from .acceptance import AcceptanceError, ManagerAcceptance
+    from .llm import LiteLLMClient
+
+    settings, repo = _repo()
+    wt = _worktrees(repo, project_id)
+    llm = LiteLLMClient(settings.registry(), usage_sink=repo.record_usage)
+    try:
+        report = ManagerAcceptance(llm, repo, wt).run(project_id)
+    except AcceptanceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    mark = {"met": "[green]met[/green]", "unmet": "[red]unmet[/red]",
+            "needs_human": "[yellow]you decide[/yellow]"}
+    print(f"Tests on integration: {'PASS' if report.tests_passed else '[red]FAIL[/red]'}")
+    for c in report.criteria:
+        print(f"  {mark[c.status]:<28} {c.criterion}  [dim]({c.decided_by})[/dim]")
+        if c.evidence:
+            print(f"      [dim]{c.evidence.splitlines()[0][:200]}[/dim]")
+        if c.status == "needs_human" and c.how_to_verify:
+            print(f"      how: {c.how_to_verify}")
+    if report.summary:
+        print(f"Manager: {report.summary}")
+    for f in report.human_focus:
+        print(f"  look at: {f}")
+    for s in report.screenshots:
+        print(f"  screenshot: {wt.integration_path / s}")
+    if report.verdict == "GAPS":
+        print("[yellow]Gaps found.[/yellow] Fix with `ai-dev-team reject <project> --note ... "
+              "--replan`, or accept anyway with `accept --force`.")
+        for f in report.follow_ups:
+            print(f"  - {f[:300]}")
+    else:
+        print("[green]Ready for your acceptance:[/green] check the items above, then "
+              f"`ai-dev-team accept {project_id}` or `ai-dev-team reject {project_id} --note ...`")
+
+
+@app.command()
+def accept(project_id: str, note: str = typer.Option("", help="Optional note"),
+           force: bool = typer.Option(False, "--force", help="Accept even with gaps")):
+    """Final acceptance, step 2: you accept the result (still never merges into main)."""
+    from .acceptance import AcceptanceError, decide
+
+    _, repo = _repo()
+    wt = _worktrees(repo, project_id)
+    try:
+        st = decide(repo, project_id, wt, approve=True, note=note, force=force)
+    except AcceptanceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    print(f"[green]Accepted.[/green] {STATUS_TEXT[st['status']]}. Merge it yourself: "
+          f"git -C {wt.repo} merge --no-ff {wt.integration_branch}")
+
+
+@app.command()
+def reject(project_id: str, note: str = typer.Option(..., help="What is wrong"),
+           replan: bool = typer.Option(False, "--replan",
+                                       help="Plan and save follow-up tasks from the note now")):
+    """Final acceptance, step 2: you reject; the note becomes the next planning request."""
+    from .acceptance import AcceptanceError, decide, replan_request
+
+    _, repo = _repo()
+    wt = _worktrees(repo, project_id)
+    try:
+        st = decide(repo, project_id, wt, approve=False, note=note)
+    except AcceptanceError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    request = replan_request(st, note)
+    print("[yellow]Rejected.[/yellow] Next planning request:\n" + request)
+    if replan:
+        _plan(project_id, request, save=True)
 
 
 @app.command("opencode-check")

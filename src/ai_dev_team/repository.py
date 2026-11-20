@@ -527,6 +527,56 @@ class TaskRepository:
             return True
 
     # ------------------------------------------------------------- usage/events
+    # ------------------------------------------------------------- acceptance (v3)
+    def save_plan(self, project_id: str, request: str, plan: dict,
+                  task_ids: list[str]) -> str:
+        plan_id = str(uuid.uuid4())
+        with self.db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO plans(id,project_id,request,plan_json,task_ids_json) "
+                "VALUES(?,?,?,?,?)",
+                (plan_id, project_id, request, json.dumps(plan, ensure_ascii=False),
+                 json.dumps(task_ids)))
+            self._event(conn, "PLAN_SAVED", project_id=project_id, plan_id=plan_id,
+                        tasks=len(task_ids))
+        return plan_id
+
+    def latest_plan(self, project_id: str) -> dict | None:
+        with self.db.connect() as conn:
+            r = conn.execute(
+                "SELECT * FROM plans WHERE project_id=? ORDER BY created_at DESC, rowid DESC "
+                "LIMIT 1", (project_id,)).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        d["plan"] = json.loads(d.pop("plan_json"))
+        d["task_ids"] = json.loads(d.pop("task_ids_json"))
+        return d
+
+    def add_acceptance(self, project_id: str, plan_id: str | None, stage: str, verdict: str,
+                       payload: dict, integration_sha: str | None = None) -> str:
+        aid = str(uuid.uuid4())
+        with self.db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO acceptances(id,project_id,plan_id,stage,verdict,integration_sha,"
+                "payload_json) VALUES(?,?,?,?,?,?,?)",
+                (aid, project_id, plan_id, stage, verdict, integration_sha,
+                 json.dumps(payload, ensure_ascii=False)))
+            self._event(conn, f"ACCEPTANCE_{stage}", project_id=project_id, verdict=verdict,
+                        plan_id=plan_id)
+        return aid
+
+    def acceptances(self, project_id: str, plan_id: str | None = None) -> list[dict]:
+        q, params = "SELECT * FROM acceptances WHERE project_id=?", [project_id]
+        if plan_id:
+            q += " AND plan_id=?"
+            params.append(plan_id)
+        with self.db.connect() as conn:
+            rows = [dict(r) for r in conn.execute(q + " ORDER BY created_at, rowid", params)]
+        for r in rows:
+            r["payload"] = json.loads(r.pop("payload_json"))
+        return rows
+
     def record_usage(self, model_id: str, input_tokens: int, output_tokens: int,
                      status: str, task_id: str | None = None, cost: float | None = None) -> None:
         with self.db.transaction() as conn:

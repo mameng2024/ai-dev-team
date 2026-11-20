@@ -39,7 +39,7 @@ def _login_shell_path() -> str:
     shell = os.getenv("SHELL") or ("/bin/zsh" if platform.system() == "Darwin" else "/bin/bash")
     try:
         out = subprocess.run([shell, "-lic", 'printf "\\n__AIDT_PATH__%s\\n" "$PATH"'],
-                             capture_output=True, text=True, timeout=8).stdout
+                             check=False, capture_output=True, text=True, timeout=8).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
     for line in reversed(out.splitlines()):
