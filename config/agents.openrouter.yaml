@@ -1,0 +1,57 @@
+# AI Dev Team - OpenRouter preset (one key: OPENROUTER_API_KEY)
+# Model IDs are "openrouter/<vendor>/<model>" (LiteLLM and OpenCode use the same form).
+# Checked against https://openrouter.ai/api/v1/models on 2026-11-20.
+
+defaults:
+  timeout_s: 180
+  max_retries: 3
+  max_concurrency: 2
+  lease_seconds: 900
+
+providers:
+  openrouter:
+    api_key_env: OPENROUTER_API_KEY
+    api_base: https://openrouter.ai/api/v1
+
+agents:
+  manager:
+    role: MANAGER
+    provider: openrouter
+    model: openrouter/qwen/qwen4-max
+    reasoning: high
+    fallbacks: [openrouter/deepseek/deepseek-v4-pro]
+  architect:
+    role: ARCHITECT
+    provider: openrouter
+    model: openrouter/deepseek/deepseek-v4-pro
+    reasoning: high
+    fallbacks: [openrouter/qwen/qwen4-max]
+  developer-a:
+    role: DEVELOPER
+    provider: openrouter
+    model: openrouter/deepseek/deepseek-v4.1-flash
+    reasoning: medium
+    fallbacks: [openrouter/deepseek/deepseek-v4-pro]
+    executor: opencode
+  developer-b:
+    role: DEVELOPER
+    provider: openrouter
+    model: openrouter/deepseek/deepseek-v4.1-flash
+    reasoning: medium
+    fallbacks: [openrouter/deepseek/deepseek-v4-pro]
+    executor: opencode
+  reviewer:
+    role: REVIEWER
+    provider: openrouter
+    model: openrouter/deepseek/deepseek-v4-pro
+    reasoning: high
+    fallbacks: []
+    independent: true
+
+opencode:
+  auto_approve: true
+  model_map: {}
+
+developer_routing:
+  simple: openrouter/deepseek/deepseek-v4.1-flash
+  complex: openrouter/deepseek/deepseek-v4-pro

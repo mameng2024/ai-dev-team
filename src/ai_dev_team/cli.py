@@ -40,6 +40,27 @@ def init():
             print(f"  - {p}")
 
 
+@app.command("use-preset")
+def use_preset(name: str = typer.Argument(..., help="Preset name, e.g. openrouter")):
+    """Replace the active agents.yaml with a built-in preset (old file kept as .bak)."""
+    from importlib.resources import files
+    src = files("ai_dev_team").joinpath("presets", f"{name}.yaml")
+    if not src.is_file():
+        avail = sorted(p.name[:-5] for p in files("ai_dev_team").joinpath("presets").iterdir()
+                       if p.name.endswith(".yaml"))
+        print(f"[red]No preset '{name}'.[/red] Available: {', '.join(avail)}")
+        raise typer.Exit(1)
+    settings = Settings.load()
+    dest = settings.config_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        shutil.copy2(dest, dest.with_suffix(".yaml.bak"))
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"[green]Preset '{name}' written to[/green] {dest}")
+    for p in settings.config_problems():
+        print(f"  - {p}")
+
+
 @app.command()
 def status():
     """Show database counts and task status breakdown."""

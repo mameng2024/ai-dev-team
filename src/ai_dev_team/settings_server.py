@@ -55,6 +55,12 @@ def _zh(msg: str) -> str:
     return msg
 
 
+
+def _vendor(model: str) -> str:
+    """Model maker: 'openrouter/qwen/x' -> 'qwen', 'deepseek/x' -> 'deepseek'."""
+    parts = model.split("/")
+    return parts[1] if parts[0] == "openrouter" and len(parts) > 2 else parts[0]
+
 def check(data: dict) -> tuple[list[str], list[str]]:
     """Return (errors, warnings) for a config dict, without saving."""
     try:
@@ -67,8 +73,8 @@ def check(data: dict) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     m = reg.by_role(AgentRole.MANAGER)[0]
     r = reg.by_role(AgentRole.REVIEWER)[0]
-    if m.provider == r.provider:
-        warnings.append(f"Manager 和 Reviewer 都用 {m.provider}，建议用不同厂商保持审核独立")
+    if _vendor(m.model) == _vendor(r.model):
+        warnings.append(f"Manager 和 Reviewer 都用 {_vendor(m.model)} 的模型，建议用不同厂商保持审核独立")
     if r.model in m.fallbacks:
         warnings.append("Manager 的备用模型和 Reviewer 主模型相同：Manager 降级时两者会是同一个模型")
     if r.fallbacks:
