@@ -1,11 +1,12 @@
 name: desktop app
 
 # Builds the desktop app (PyInstaller cannot cross-compile). Currently macOS only.
-# Only on demand, to save Actions minutes (macOS minutes count several times over):
-# - "Run workflow" on the Actions page: build + self-check, files kept as artifacts
-# - a tag like v0.7.0: the same, plus a GitHub Release with the three downloads
+# - every push to any branch: macOS build + self-check, the .dmg kept as an artifact
+# - "Run workflow" on the Actions page: the same, on demand
+# - a tag like v0.7.0: the same, plus a GitHub Release with the download
 on:
   push:
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
 
