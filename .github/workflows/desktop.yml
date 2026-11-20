@@ -1,15 +1,10 @@
 name: desktop app
 
 # Builds the desktop app on macOS, Windows and Linux (PyInstaller cannot cross-compile).
-# - every pull request that touches the app: build + self-check, files kept as artifacts
+# Only on demand, to save Actions minutes (macOS minutes count several times over):
+# - "Run workflow" on the Actions page: build + self-check, files kept as artifacts
 # - a tag like v0.7.0: the same, plus a GitHub Release with the three downloads
 on:
-  pull_request:
-    paths:
-      - "src/**"
-      - "packaging/**"
-      - "pyproject.toml"
-      - ".github/workflows/desktop.yml"
   push:
     tags: ["v*"]
   workflow_dispatch:

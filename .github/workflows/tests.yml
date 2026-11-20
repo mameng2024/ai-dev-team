@@ -1,0 +1,20 @@
+name: tests
+
+# Cheap check on every pull request: the test suite on Linux only.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          python -m pytest -q
