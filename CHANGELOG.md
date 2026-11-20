@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 — Desktop app for macOS, Windows and Linux
+
+- The app opens in its own window (pywebview), no browser. Falls back to the browser
+  when a machine has no webview.
+- Self-contained builds with Python inside (PyInstaller): `.dmg` for macOS (Apple
+  Silicon), `.zip` with `AI Dev Team.exe` for Windows, `.tar.gz` for Linux.
+- GitHub Actions builds all three on every pull request; a `v*` tag publishes a Release.
+- First start uses the free OpenRouter preset; settings live in the per-user app folder.
+- OpenRouter presets (`openrouter`, `openrouter-free`) and `ai-dev-team use-preset`.
+- `ai-dev-team desktop` runs the same window from a source install.
+
 ## 0.6.0 — Mac app + one unified page
 
 - `ai-dev-team ui` is now one page with tabs: 项目与运行 / 看板 / 模型设置.

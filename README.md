@@ -1,7 +1,20 @@
 # AI Dev Team
 
+## Desktop app (macOS, Windows, Linux)
+
+Download the build for your system from the repo's Releases (or a pull request's
+Actions artifacts). Python is included; you only need OpenCode and git installed.
+
+- macOS: open the `.dmg`, drag AI Dev Team to Applications. It is not signed yet, so
+  the first time right-click it and choose Open.
+- Windows: unzip, run `AI Dev Team.exe` (SmartScreen: More info, Run anyway).
+- Linux: untar, run `ai-dev-team/ai-dev-team`.
+
+Build one yourself on that system: `pip install -e '.[package]'` then
+`python packaging/desktop/build.py --smoke`. Publish all three: push a tag like `v0.7.0`.
+
 A lightweight, local-first multi-agent software development orchestrator for macOS Apple Silicon.
-Cloud model APIs only; no local LLMs. Version 0.6.0 implements P0 to P7 (see
+Cloud model APIs only; no local LLMs. Version 0.7.0 implements P0 to P7 (see
 `docs/IMPLEMENTATION_PLAN.md`). Real model and real OpenCode runs still have to be checked
 on your Mac. The tests use a fake OpenCode binary and a fake review verdict.
 

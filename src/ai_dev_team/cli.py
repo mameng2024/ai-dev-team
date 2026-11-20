@@ -401,6 +401,14 @@ def ui(port: int = 8765, no_browser: bool = typer.Option(False, "--no-browser"),
           url_file=url_file)
 
 
+@app.command()
+def desktop(browser: bool = typer.Option(False, "--browser", help="Use the browser instead")):
+    """Open AI Dev Team in its own window (the packaged app's entry point)."""
+    from .desktop import main as desktop_main
+
+    raise typer.Exit(desktop_main(["--browser"] if browser else []))
+
+
 @app.command("test-check")
 def test_check(workspace: Path = typer.Option(Path("."), help="Directory to test")):
     """Run only the test gate in a workspace and print the report (no state change)."""

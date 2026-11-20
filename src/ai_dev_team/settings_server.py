@@ -312,8 +312,12 @@ def make_handler(config_path: Path, token: str, db_path: Path | None = None,
     return Handler
 
 
-def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
-          db_path: Path | None = None, url_file: Path | None = None) -> None:
+def start_server(config_path: Path, port: int = 8765, db_path: Path | None = None):
+    """Bind the local page and return (server, url, jobs) without blocking.
+
+    The caller runs ``server.serve_forever()`` (in a thread for the desktop app) and
+    calls ``stop_server`` when done.
+    """
     from .jobs import JobManager
 
     token = pysecrets.token_urlsafe(24)
@@ -329,6 +333,18 @@ def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
     if server is None:
         raise SystemExit(f"ports {port}-{port + 10} are all in use")
     url = f"http://127.0.0.1:{server.server_port}/?token={token}"
+    return server, url, jobs
+
+
+def stop_server(server, jobs) -> None:
+    jobs.stop_all()
+    server.shutdown()
+    server.server_close()
+
+
+def serve(config_path: Path, port: int = 8765, open_browser: bool = True,
+          db_path: Path | None = None, url_file: Path | None = None) -> None:
+    server, url, jobs = start_server(config_path, port, db_path)
     print(f"AI Dev Team: {url}\nCtrl+C to stop.", flush=True)
     if url_file:
         url_file.parent.mkdir(parents=True, exist_ok=True)

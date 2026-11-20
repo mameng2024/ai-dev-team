@@ -10,3 +10,5 @@ data/
 logs/
 .worktrees/
 .DS_Store
+dist/
+packaging/desktop/build/
